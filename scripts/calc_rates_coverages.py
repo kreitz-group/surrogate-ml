@@ -11,6 +11,20 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+# each worker process loads the mechanism once and reuses it for every condition,
+# since creating a new Interface for each condition leaks memory
+
+surf1 = None
+initial_coverages = None
+
+
+def init_worker(yaml_file: Path):
+
+    global surf1, initial_coverages
+
+    surf1 = ct.Interface(yaml_file, name='surface1')
+    initial_coverages = surf1.coverages.copy()
+
 
 def main():
 
@@ -29,17 +43,14 @@ def main():
     out_dir = REPO_ROOT / 'results' / 'ML_data'
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    # write each run to the csv as it finishes,
-    # restarting each worker after 200 conditions so its memory is returned to the OS
+    # write each run to the csv as it finishes
 
-    with ProcessPoolExecutor(max_tasks_per_child=200) as executor, \
+    with ProcessPoolExecutor(initializer=init_worker, initargs=(yaml_dir,)) as executor, \
          (out_dir / 'rates_coverages.csv').open('w', newline='') as csv_file:
 
         writer = csv.writer(csv_file)
 
-        results = executor.map(compute_rate_coverage,
-                               [yaml_dir] * len(condition_numbers),
-                               conditions)
+        results = executor.map(compute_rate_coverage, conditions)
 
         # skip conditions that failed to converge, and write the headers with the first one that didn't
 
@@ -63,7 +74,7 @@ def main():
     print(n_failed)
 
 
-def compute_rate_coverage(yaml_file: Path, conditions: pd.Series):
+def compute_rate_coverage(conditions: pd.Series):
 
     # unit conversion factors to SI
 
@@ -101,8 +112,10 @@ def compute_rate_coverage(yaml_file: Path, conditions: pd.Series):
 
     p = p_bar * bar # pressure
 
-    surf1 = ct.Interface(yaml_file, name='surface1')
+    # reset this worker's surface to its initial coverages and set the new conditions
+
     surf1.TP = t, p
+    surf1.coverages = initial_coverages
 
     gas1 = surf1.adjacent['gas']
     gas1.TPX = t, p, composition_dict
