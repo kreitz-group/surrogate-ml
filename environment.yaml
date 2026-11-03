@@ -47,5 +47,5 @@ dependencies:
 - coolprop  # optional (needed for some examples)
 - pint  # optional (needed for some examples)
 - pip:  # PyPI managed packages
-  - optunity  # Sobol sequence generator used in generate_sobol.py
+  - optunity  # Sobol sequence generator used in generate_sobol_dirichlet.py
 #   - "git+https://github.com/Cantera/sphinx-tags.git@main"  # optional (needed for documentation)
