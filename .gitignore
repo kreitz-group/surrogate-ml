@@ -218,3 +218,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+#ignore the pdfs of papers
+papers/
+
+CLAUDE.md
+
+results/expnet

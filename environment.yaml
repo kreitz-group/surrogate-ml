@@ -30,6 +30,10 @@ dependencies:
 - ipython  # optional (needed for nicer interactive command line)
 - jupyter  # optional (needed for Jupyter Notebook)
 - tqdm  # progress bars in calc_rates_coverages.py
+# +/- ExpNet surrogate training (Döppel et al. 2026)
+- pytorch  # conda-forge picks the CUDA build when an NVIDIA driver is present, CPU build otherwise
+- torchdiffeq  # differentiable ODE solvers (dopri8) for training on reactor profile data
+- sympy  # exact rref for the atom-conservation completion matrix
 # - sphinx  # optional (needed for documentation)
 # - pydata-sphinx-theme  # optional (needed for documentation)
 # - myst-nb  # optional (needed for documentation)
