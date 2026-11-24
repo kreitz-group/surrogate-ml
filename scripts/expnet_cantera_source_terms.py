@@ -11,6 +11,8 @@ data.
                   production rates are read off. No steady-state solve is needed because the
                   HDF5 file already holds the steady-state coverages (pass --resolve to solve
                   them again instead).
+    experimental_sim  The same, for mechanism 4758 simulated at the 24 experimental conditions
+                  (results/NiSiO2_24_conditions.h5), which also stores the coverages.
     experimental  At every measured point of the Küchen profiles the surface is solved to
                   steady state at the measured T, p and composition (as in calc_rates_coverages.py).
                   This compares the ExpNet trained on measurements with mechanism 4758.
@@ -41,11 +43,11 @@ from expnet import data as D  # noqa: E402
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--dataset', choices=['generated', 'experimental'], default='generated')
+    p.add_argument('--dataset', choices=D.DATASETS, default='generated')
     p.add_argument('--data-root', type=Path, default=D.DEFAULT_DATA_ROOT)
     p.add_argument('--mechanism', type=int, default=4758)
-    p.add_argument('--stride', type=int, default=10, help='every n-th axial point (generated)')
-    p.add_argument('--resolve', action='store_true', help='solve coverages to steady state (generated)')
+    p.add_argument('--stride', type=int, default=10, help='every n-th axial point (simulated datasets)')
+    p.add_argument('--resolve', action='store_true', help='solve coverages to steady state (simulated datasets)')
     p.add_argument('--out', type=Path, default=None)
     return p.parse_args()
 
@@ -69,15 +71,23 @@ def main():
 
     rows, n_failed = [], 0
 
-    if args.dataset == 'generated':
+    if args.dataset in ('generated', 'experimental_sim'):
         import h5py
         reactor = D.Reactor()
         dz_mm = reactor.length / (reactor.n_cstr - 1) * 1e3
-        h5_file = args.data_root / 'results' / f'NiSiO2_generated_conditions_mechanism_{args.mechanism}.h5'
+        if args.dataset == 'generated':
+            h5_file = args.data_root / 'results' / f'NiSiO2_generated_conditions_mechanism_{args.mechanism}.h5'
+        else:
+            h5_file = args.data_root / 'results' / 'NiSiO2_24_conditions.h5'
 
         with h5py.File(h5_file, 'r') as f:
-            for cond in tqdm(sorted(f, key=lambda k: int(k.split('_')[1]))):
-                ds = f[f'{cond}/mechanism_{args.mechanism}']
+            for group in tqdm(sorted(f, key=lambda k: int(k.split('_')[1]))):
+                key = f'{group}/mechanism_{args.mechanism}'
+                if key not in f:
+                    continue
+                ds = f[key]
+                # condition names as in expnet.data: condition_<k> or exp_<n>
+                cond = group if args.dataset == 'generated' else group.removesuffix('_on_NiSiO2')
                 prof = pd.DataFrame(ds[:], columns=list(ds.attrs['columns']))
                 idx = np.unique(np.r_[np.arange(0, len(prof), args.stride), len(prof) - 1])
 

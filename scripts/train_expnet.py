@@ -24,6 +24,9 @@ Examples:
 
     # the measured Küchen profiles
     python scripts/train_expnet.py --dataset experimental --seeds 10 --workers 10 --tag paper
+
+    # mechanism 4758 simulated at the 24 Küchen conditions (same split as 'experimental')
+    python scripts/train_expnet.py --dataset experimental_sim --seeds 10 --workers 10 --tag paper
 """
 
 import argparse
@@ -48,7 +51,9 @@ from expnet.train import Config, train_one, write_json  # noqa: E402
 
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument('--dataset', choices=['generated', 'experimental'], default='generated')
+    p.add_argument('--dataset', choices=D.DATASETS, default='generated',
+                   help="'generated' (200 simulated conditions), 'experimental' (24 measured profiles) or "
+                        "'experimental_sim' (mechanism 4758 simulated at the 24 experimental conditions)")
     p.add_argument('--data-root', default=str(D.DEFAULT_DATA_ROOT), help='path to the methanation-model repo')
     p.add_argument('--tag', default=None, help='run name (default: timestamp)')
     p.add_argument('--seeds', type=int, default=10, help='number of random initializations')
@@ -64,7 +69,7 @@ def parse_args():
     p.add_argument('--epochs-dopri', type=int, default=100)
     p.add_argument('--out-bias', type=float, default=None, help='initial output bias (default: from data)')
     p.add_argument('--split-seed', type=int, default=0)
-    p.add_argument('--obs-stride', type=int, default=1, help='use every n-th axial point (generated data)')
+    p.add_argument('--obs-stride', type=int, default=1, help='use every n-th axial point (simulated datasets)')
     p.add_argument('--device', default='cpu', help="'cpu' or 'cuda'")
     p.add_argument('--dtype', choices=['float64', 'float32'], default='float64')
     p.add_argument('--log-every', type=int, default=100)
@@ -76,7 +81,7 @@ def parse_args():
 def run_seed(cfg, seed, run_dir, threads):
     torch.set_num_threads(threads)
     reactor = D.Reactor()
-    data = D.load(cfg.dataset, cfg.data_root, reactor, **({'obs_stride': cfg.obs_stride} if cfg.dataset == 'generated' else {}))
+    data = D.load(cfg.dataset, cfg.data_root, reactor, obs_stride=cfg.obs_stride)
     train_idx, val_idx, _ = D.split_indices(len(data), cfg.split, cfg.split_seed)
     train, val = data.subset(train_idx), data.subset(val_idx)
 
@@ -120,8 +125,7 @@ def main():
     run_dir.mkdir(parents=True, exist_ok=True)
 
     # data summary and split, written once by the main process
-    data = D.load(cfg.dataset, cfg.data_root, D.Reactor(),
-                  **({'obs_stride': cfg.obs_stride} if cfg.dataset == 'generated' else {}))
+    data = D.load(cfg.dataset, cfg.data_root, D.Reactor(), obs_stride=cfg.obs_stride)
     train_idx, val_idx, test_idx = D.split_indices(len(data), cfg.split, cfg.split_seed)
     write_json(asdict(cfg), run_dir / 'config.json')
     write_json({k: [data.names[i] for i in idx] for k, idx in

@@ -90,8 +90,7 @@ def main():
     data_root = args.data_root or cfg['data_root']
 
     reactor = D.Reactor()
-    kwargs = {'obs_stride': 1} if cfg['dataset'] == 'generated' else {}
-    data = D.load(cfg['dataset'], data_root, reactor, **kwargs)
+    data = D.load(cfg['dataset'], data_root, reactor, obs_stride=1)
     pfr, ckpt = load_model(run_dir / args.model)
     print(f'{run_dir.name}: seed {ckpt.get("seed")}, {ckpt["n_parameters"]} parameters, '
           f'key species {ckpt["key_species"]}')
@@ -166,7 +165,7 @@ def main():
     prof_dir.mkdir(exist_ok=True)
     for old in prof_dir.glob('*.png'):
         old.unlink()
-    stride = max(1, len(z_mm) // 20)   # generated profiles have 201 points; show about 20 markers
+    stride = max(1, len(z_mm) // 20)   # simulated profiles have 201 points; show about 20 markers
     n_plotted = 0
     for b, name in enumerate(data.names):
         if splits[b] not in plot_splits:

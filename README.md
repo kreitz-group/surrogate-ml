@@ -142,9 +142,12 @@ Differences from the paper are deliberate and small: (1) a single RMSprop optimi
 |---|---|---|---|
 | `generated` (default) | `results/NiSiO2_generated_conditions_mechanism_4758.h5` + `data/NiSiO2_generated_conditions.csv` | 200 (isothermal, simulated with mechanism 4758) | 201 |
 | `experimental` | `data/Kuchen_Experimental_data/exp_*_data.csv` | 24 (measured, with T profile) | 23 after the z = 0 inlet |
+| `experimental_sim` | `results/NiSiO2_24_conditions.h5` (`exp_<n>_on_NiSiO2/mechanism_4758`) | 24 (the experimental conditions, simulated with mechanism 4758) | 201 |
 
 - For the generated data, Cantera's 201-CSTR chain outputs tank *n* at `Distance = n·L/200`. In plug-flow terms this point is at (n+1)·L/200, and that is where it is placed. The CSV composition is the inlet.
 - For the experimental data, the measured composition at z = 0 is the inlet, as in the Cantera simulations of those experiments. H2O in those files is calculated as CO + 2·CH4, not measured, so its error is not independent of the CH4 and CO errors.
+- `experimental_sim` uses the same inlets, measured temperature profiles and pressures as `experimental` (the simulation imposed them). Only the profiles differ: they are mechanism 4758's noise-free predictions at 201 points instead of the 23 measured points. The condition names are the same (`exp_<n>`), so the same `--split-seed` gives the same train/val/test experiments. Comparing a model trained on `experimental_sim` with one trained on `experimental` separates two effects: how much error comes from having only 24 conditions, and how much from measurement noise plus the mechanism not matching the experiments.
+- `--obs-stride n` keeps every n-th point of either simulated dataset.
 
 ### Setup
 
@@ -184,6 +187,7 @@ On the server (the paper's protocol: 10 models with different random starts, bes
 ```bash
 python scripts/train_expnet.py --dataset generated    --seeds 10 --workers 10 --threads 1 --tag paper --data-root /path/to/methanation-model
 python scripts/train_expnet.py --dataset experimental --seeds 10 --workers 10 --threads 1 --tag paper --data-root /path/to/methanation-model
+python scripts/train_expnet.py --dataset experimental_sim --seeds 10 --workers 10 --threads 1 --tag paper --data-root /path/to/methanation-model
 ```
 
 - `--workers` is how many models train at the same time. Each one uses `--threads` CPU threads, so keep `workers × threads` at or below the number of cores.
@@ -270,6 +274,7 @@ python scripts/evaluate_expnet.py results/expnet/generated/paper --cantera resul
 
 - `--stride 10` uses every 10th axial point.
 - For the generated data it reuses the steady-state coverages stored in the HDF5 file, so no solve is needed and it should be fast. Pass `--resolve` to solve the coverages again instead.
+- `--dataset experimental_sim` works like `generated`: it reads the stored coverages from `NiSiO2_24_conditions.h5`.
 - `--dataset experimental` solves the surface to steady state at every measured point, so it is slower and some points may fail to converge.
 - The comparison is written to `eval/source_terms.png` and `eval/source_term_metrics.csv`.
 

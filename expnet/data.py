@@ -1,15 +1,19 @@
 """
 Reactor profile data for the Ni/SiO2 profile reactor, read from the methanation-model repo.
 
-Two datasets are supported:
+Three datasets are supported:
 
     generated     results/NiSiO2_generated_conditions_mechanism_4758.h5
                   200 isothermal conditions simulated with the best-fit mechanism 4758
                   (inlets in data/NiSiO2_generated_conditions.csv), 201 axial points each.
     experimental  data/Kuchen_Experimental_data/exp_{0..23}_data.csv
                   24 measured profiles with a measured axial temperature profile.
+    experimental_sim  results/NiSiO2_24_conditions.h5, group exp_<n>_on_NiSiO2/mechanism_4758
+                  mechanism 4758 simulated at the 24 experimental conditions (measured inlet
+                  and measured T(z) imposed), 201 axial points each. Same condition names
+                  (exp_<n>) as 'experimental', so the same --split-seed gives the same split.
 
-Both are turned into a ProfileData: inlet molar flows, pressure, a temperature profile T(z),
+All are turned into a ProfileData: inlet molar flows, pressure, a temperature profile T(z),
 and the observed mole fractions at the measured axial positions.
 
 The reactor constants mirror scripts/methanation_on_NI_SIO/modeling/Simulation_Methods.py
@@ -103,6 +107,23 @@ def _inlet_flows(x_in, reactor):
     return x_in * reactor.total_molar_flow
 
 
+def _read_profile(ds, key):
+    """Mole fractions (201, S) of one Cantera CSTR-chain profile stored in the HDF5 files."""
+    prof = pd.DataFrame(ds[:], columns=list(ds.attrs['columns']))
+    y = prof[[MECH_NAMES[s] for s in SPECIES]].to_numpy()
+    return y / y.sum(axis=1, keepdims=True)
+
+
+def _cstr_positions(n_points, reactor):
+    """Tank n's outlet sits at (n + 1) L/200 in plug-flow terms (Cantera writes it at n L/200)."""
+    dz = reactor.length / (reactor.n_cstr - 1)
+    return (np.arange(n_points) + 1) * dz
+
+
+def _stride_keep(n_points, obs_stride):
+    return np.unique(np.r_[np.arange(obs_stride - 1, n_points, obs_stride), n_points - 1])
+
+
 def load_generated(data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), mechanism=4758, obs_stride=1):
     """
     Profiles of the best-fit mechanism at the 200 generated conditions.
@@ -127,26 +148,20 @@ def load_generated(data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), mechanism=475
             if key not in f:  # failed simulations are missing from the file
                 continue
 
-            ds = f[key]
-            prof = pd.DataFrame(ds[:], columns=list(ds.attrs['columns']))
-
+            y = _read_profile(f[key], key)
             if n_points is None:
-                n_points = len(prof)
-            elif len(prof) != n_points:
-                raise ValueError(f'{key} has {len(prof)} points, expected {n_points}')
-
-            y = prof[[MECH_NAMES[s] for s in SPECIES]].to_numpy()
-            y_obs.append(y / y.sum(axis=1, keepdims=True))
+                n_points = len(y)
+            elif len(y) != n_points:
+                raise ValueError(f'{key} has {len(y)} points, expected {n_points}')
+            y_obs.append(y)
 
             names.append(f'condition_{int(row["condition"])}')
             x_in.append(row[SPECIES].to_numpy(dtype=float))
             P_atm.append(row['p'] * 1e5 / ONE_ATM)
             T.append(float(row['Temp']))
 
-    dz = reactor.length / (reactor.n_cstr - 1)
-    z_all = (np.arange(n_points) + 1) * dz
-
-    keep = np.unique(np.r_[np.arange(obs_stride - 1, n_points, obs_stride), n_points - 1])
+    z_all = _cstr_positions(n_points, reactor)
+    keep = _stride_keep(n_points, obs_stride)
 
     T = np.asarray(T)
     return ProfileData(
@@ -202,11 +217,76 @@ def load_experimental(data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), n_experime
     )
 
 
-def load(dataset, data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), **kwargs):
+def load_experimental_sim(data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), mechanism=4758, obs_stride=1,
+                          n_experiments=24):
+    """
+    Mechanism 4758 simulated at the 24 Küchen conditions (simulate_5000_mechanisms_24_conditions.py).
+
+    The simulation feeds the measured z = 0 composition into the 201-CSTR chain and sets each
+    tank to the measured temperature interpolated at its position, so the inlet and T(z) here are
+    taken from the experimental files exactly as in load_experimental. Only the observations
+    differ: noise-free simulated profiles at 201 points instead of 23 measured points.
+    """
+
+    data_root = Path(data_root)
+    exp_dir = data_root / 'data' / 'Kuchen_Experimental_data'
+    h5_file = data_root / 'results' / 'NiSiO2_24_conditions.h5'
+
+    import h5py
+
+    names, x_in, P_atm, T, y_obs = [], [], [], [], []
+    z_ref, n_points = None, None
+
+    with h5py.File(h5_file, 'r') as f:
+        for n in range(n_experiments):
+            key = f'exp_{n}_on_NiSiO2/mechanism_{mechanism}'
+            if key not in f:  # failed simulations are missing from the file
+                print(f'Warning: {key} not in {h5_file.name}, skipping exp_{n}')
+                continue
+
+            y = _read_profile(f[key], key)
+            if n_points is None:
+                n_points = len(y)
+            elif len(y) != n_points:
+                raise ValueError(f'{key} has {len(y)} points, expected {n_points}')
+
+            df = pd.read_csv(exp_dir / f'exp_{n}_data.csv').sort_values('z')
+            z = df['z'].to_numpy(dtype=float) * 1e-3
+            if z_ref is None:
+                z_ref = z
+            elif not np.allclose(z, z_ref):
+                raise ValueError(f'exp_{n} is measured at different positions than exp_0')
+
+            names.append(f'exp_{n}')
+            x_in.append(df[SPECIES].to_numpy(dtype=float)[0])
+            P_atm.append(df['p'].iloc[0] * 1e5 / ONE_ATM)
+            T.append(df['Temp'].to_numpy(dtype=float))
+            y_obs.append(y)
+
+    keep = _stride_keep(n_points, obs_stride)
+    return ProfileData(
+        names=names,
+        n_in=_as_tensor(_inlet_flows(np.asarray(x_in), reactor)),
+        P_atm=_as_tensor(P_atm),
+        z_T=_as_tensor(z_ref),
+        T=_as_tensor(np.stack(T)),
+        z_obs=_as_tensor(_cstr_positions(n_points, reactor)[keep]),
+        y_obs=_as_tensor(np.stack(y_obs)[:, keep, :]),
+        meta={'dataset': 'experimental_sim', 'mechanism': mechanism, 'obs_stride': obs_stride},
+    )
+
+
+DATASETS = ['generated', 'experimental', 'experimental_sim']
+
+
+def load(dataset, data_root=DEFAULT_DATA_ROOT, reactor=Reactor(), obs_stride=1):
+    """Load a dataset by name. obs_stride (every n-th axial point) only applies to the simulated ones."""
     if dataset == 'generated':
-        return load_generated(data_root, reactor, **kwargs)
+        return load_generated(data_root, reactor, obs_stride=obs_stride)
     if dataset == 'experimental':
         return load_experimental(data_root, reactor)
+    if dataset == 'experimental_sim':
+        return load_experimental_sim(data_root, reactor, obs_stride=obs_stride)
     raise ValueError(f'unknown dataset {dataset!r}')
 
 
