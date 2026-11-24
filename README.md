@@ -29,6 +29,7 @@ surrogate-ml/
 |   |-- calc_rates_coverages.py
 |   |-- train_expnet.py
 |   |-- evaluate_expnet.py
+|   |-- evaluate_expnet_generated.py
 |   `-- expnet_cantera_source_terms.py
 |-- environment.yaml
 |-- LICENSE
@@ -121,6 +122,7 @@ methanation-model/                         surrogate-ml/
 | `expnet/train.py` | Staged training loop, saving and loading models |
 | `scripts/train_expnet.py` | Command-line training, several seeds in parallel |
 | `scripts/evaluate_expnet.py` | Metrics and plots for a trained run |
+| `scripts/evaluate_expnet_generated.py` | Tests any trained model on all 200 generated profiles and plots each one |
 | `scripts/expnet_cantera_source_terms.py` | Mechanism 4758's true source terms, used to check the learned kinetics (uses Cantera) |
 
 The scripts only **read** from `methanation-model`, which defaults to `/home/austin/methanation-model`. On another machine, pass `--data-root /path/to/methanation-model`.
@@ -226,6 +228,36 @@ This integrates the best model with dopri8 for every condition and writes to `<r
 | `profiles/<condition>.png` | One plot per condition (e.g. `profiles/exp_14.png`): ExpNet model (lines) vs. experiment or Cantera data (circles), with the split in the title. All conditions by default; `--profiles test` (or `train`/`val`) limits it. The folder is cleared on each run. |
 | `history.png` | Loss curve through all the stages |
 | `predictions.csv` | Observed and predicted values at every axial point |
+
+#### Test any model on the 200 generated profiles
+
+`scripts/evaluate_expnet_generated.py` runs a trained model on all 200 generated profiles in methanation-model (`results/NiSiO2_generated_conditions_mechanism_4758.h5`, simulated with mechanism 4758) and plots every one:
+
+```bash
+python scripts/evaluate_expnet_generated.py                                         # default: results/expnet/generated/laptop_1seed
+python scripts/evaluate_expnet_generated.py results/expnet/generated/paper          # a run folder (uses best_model.pt)
+python scripts/evaluate_expnet_generated.py results/expnet/generated/paper/seed_3/model.pt   # one seed
+python scripts/evaluate_expnet_generated.py results/expnet/experimental/laptop_1seed  # experiment-trained model vs. mechanism 4758
+```
+
+- **Model trained on the generated data:** each condition is labelled train/val/test from the run's `split.json`. The test conditions are the fair check.
+- **Any other model:** every condition is labelled `unseen`. Generated conditions outside the model's training range of T and p are extrapolations.
+
+It takes about 1.5 minutes on the laptop. Use `--no-profiles` to skip the 200 plots. It writes to `<run>/eval_generated/`:
+
+| File | What to look at |
+|---|---|
+| `profiles/condition_<k>.png` | One plot per condition: CH4, CO2, CO, H2O on the left and H2 on its own axis on the right. The model is drawn as lines and the Cantera simulation as circles. The title gives T, p, the inlet composition, the split, and the outlet relative error of each species. |
+| `condition_errors.csv` | One row per condition: T, p, inlet, split, and the outlet relative error and mean absolute profile error per species. Sort it to find the worst conditions. |
+| `error_map.png` | Outlet relative error of each condition over T and p, one panel per species. Shows where in the operating window the model struggles. |
+| `metrics.csv`, `parity_outlet.png`, `predictions.csv` | As for `evaluate_expnet.py` |
+
+Relative outlet errors blow up when a mole fraction is close to zero, so a large percentage is not always a bad fit. Two cases:
+
+- **Near full conversion** (e.g. condition_11, about 355 °C): CO2 and CO are tiny at the outlet.
+- **At low temperature** (about 235 °C): CH4 and H2O are tiny.
+
+Look at the profile plot before trusting a large percentage.
 
 ### 4. Check the learned rates against Cantera (optional, uses Cantera)
 
